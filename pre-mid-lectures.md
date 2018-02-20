@@ -1,3 +1,8 @@
+**I doubt anyone besides me is actually ever going to look at these, so if you are,
+note that a lot of the formatting is broken in this file. Potentially, it's broken
+in the files that make it up, either way, sorry. Feel free to submit a pull request
+if you really want to fix the formatting**
+
 CS146 Lecture 2 January 9, 2018 \# Reasoning about side-effects For pure
 functional programming- substitution model Can the substitution model be
 adapted? - "state of the world" is an extra input and output at each
