@@ -1,0 +1,200 @@
+{\rtf1\ansi\ansicpg1252\cocoartf1504\cocoasubrtf820
+{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\margl1440\margr1440\vieww10800\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 CS146 lecture 31 April 3 2018\
+\
+Todo: update formatting\
+\
+Recall applyCont, zipper, continuation: add recall\
+\
+- substitution is not tail recursive and is expensive\
+- bring back environments\
+	- interpret Fun - create closure (package with env)\
+- env also part of some continuations\
+\
+data Val = Numb Integer | Closure String Ast Env\
+data Cont = MT | AppL Ast Env Cont | AppR Ast Cont\
+			| BinL Op Ast Env Cont | BinR Op Ast Cont\
+\
+Interp:: Ast->Cont->Env->Val\
+Interp (Bin op x y) c e = interp x (BinL op x y e c) e\
+Interp (App f x) c e = interp f (AppL x e c) e\
+Interp (Fun fp fb) c e = applyCont c (Closure fp fb e)\
+Interp (Var x) c e = applyCont c (lookup x e)\
+Interp x c e = applyCont c x\
+\
+applyCont:: Cont->Val->Val\
+applyCont (BinL op y e k) x = interp y (BinR op x k) e\
+applyCont (BinR Plus (Numb x) k) (Numb y) = applyCont k (Numb (x+y))\
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+\cf0 applyCont (BinR Times (Numb x) k) (Numb y) = applyCont k (Numb (x*y))\
+applyCont (AppL a e k) f = interp a (AppR f k) e \
+applyCont (AppR (closure fp fb e) k) x = intern fb ((fp,x):e)\
+applyCont MT x = x\
+\
+- interp + applyCont now tail recursive \
+Now - translate into an imperative language - How?\
+1) Merge them into one loop - params become loop vars\
+2) trampolining - trampoline fn calls the first tail recursive fn\
+	- that fn does not call the next fn\
+	- it \'93bounces\'94 the fn + args back to the trampoline which calls the next fn\
+	- bounce - structure containing fn + args\
+\
+e.g. (Racket)\
+\
+(struct bounce (fn args))\
+(define (trampoline x)\
+	(if (bounce? x) \
+		(trampoline (apply (bounce-fn x)\
+					    (bounce-args x)))\
+		x))\
+\
+- tail recursive - trivial loop\
+\
+Tail-recursive calls to (interp x cont env) become (bounce interp (list x cont env))\
+	- similarly, applyCont\
+\
+To start the interpreter: \
+	(trampoline (bounce interp (list exp mt-cont mt-env)))\
+\
+All recursive calls bound back to the trampoline - no stack growth, easy to write as a loop\
+\
+But - languages like C don\'92t have apply\
+	- can bounce back a fn ptr\
+	- what about the args?\
+\
+Alternatively - make all the params of interp/applyCont global vars\
+	- interp/applyCont take not arguments + mutate these global vars\
+	- bounce just returns a fn ptr\
+\
+
+\fs36 A bit more C\
+
+\fs24 \
+Heterogeneous data - tread carefully\'85\
+\
+What if you want to create a list of items of varying type?\
+\
+Struct Node \{\
+	_(any)_ data;  // don\'92t know the size, must be a ptr \'85 to what?\
+	Struct Node *next;\
+\};\
+\
+Answer:\
+\
+Struct Node \{\
+	void *data;\
+	Struct Node *next;\
+\}\
+\
+Type void* - pointer to anything\
+	- can\'92t dereference void* ptrs \
+	- can convert a void* to any other ptr type\
+e.g. \
+Int f(void *p, void *q) \{\
+  int *a = p;\
+  int *b = q;\
+  return *a + *b;\
+\}\
+\
+- what if p & q don\'92t point to ints?\
+	 - undefined\
+\
+If you want to write a Racket interpreter in C\'85\
+How do  you model the AST type?\
+	- can be App, Fun, \'85\
+\
+Struct App \{\
+	Ast *fn;\
+	Ast *arg;\
+\};\
+\
+Struct Fun \{\
+	char *x;\
+	Ast *body;\
+\};\
+\
+An Act is either App or Fun or \'85 how do we do this?\
+	Ast = void* - an Ast can be anything? No\
+Better: unions\
+\
+Struct Fun;\
+Struct App;\
+Union Ast \{\
+	Struct Fun *f;\
+	Struct App *a;\
+\}\
+\
+Struct Fun \{\'85\};\
+Struct App \{\'85\};\
+\
+A Union contains 1 (not all) of its fields\
+- compiler sets aside enough space for the biggest\
+\
+Careful\'85 \
+Struct Fun *f = \'85;\
+Union Ast u;\
+u.f = f;\
+Struct App *a = u.a; // undefined\
+\
+Your responsibility to keep track of which field of the union is in use\
+\
+Enum Type \{FUN,APP);\
+\
+Struct Ast \{\
+	enum type t;\
+	union \{\
+		Struct Fun *f;\
+		Struct App *a;\
+	\};\
+\};\
+\
+
+\fs36 Multidimensional Arrays
+\fs24 \
+\
+Int x[5][10];\
+	- Array of 5 elements, each of which is an array of 10 ints\
+	- 50 consecutive spots in memory\
+\
+int i,j,a;\
+for (i = 0; i<5; ++i) \{\
+	for (j=0; j<10; ++j) \{\
+		a += x[I][j];\
+	\}\
+\}\
+\
+If we reverse the loop:\
+\
+for (j = 0; i<10; ++j) \{\
+	for (i=0; i<5; ++i) \{\
+		a += x[i][j];\
+	\}\
+\}\
+\
+- probably runs slower\
+- does not access consecutive items\
+\
+Passing Multidimensional Arrays as args\
+\
+int f(int x[][]) \{\
+	// illegal\
+\}\
+- x[I][j] - access item at x + I*rowsize+j \
+	- don\'92t know the downsize\
+\
+int f(int x[][10]) \{\'85\}\
+- can only leave first dimension unspecified\
+\
+More common: arrays of ptrs\
+\
+int **x = malloc(5 * sizeof(int*));\
+for (i = 0; i < 5; ++i) \{\
+	x[i] = malloc(10 * sizeof(int));\
+\}\
+- very different\
+- still x[i][j]}
